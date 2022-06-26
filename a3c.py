@@ -1,26 +1,17 @@
 from __future__ import print_function
-
+import os
+import numpy as np
+import random
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.distributions import Categorical
-from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
-
-
-import numpy as np
-import random
-import time
-
 from torch.autograd import Variable
-
-import time
 from collections import deque
 
-import os
-import torch
-import torch.multiprocessing as mp
 from envs import create_atari_env
 from model import A3C
 import shared_optim
