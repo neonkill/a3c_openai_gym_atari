@@ -4,7 +4,7 @@ from gym.spaces.box import Box
 import cv2
 
 
-# Taken from https://github.com/openai/universe-starter-agent
+
 def create_atari_env(env_id):
     env = gym.make(env_id)
     if len(env.observation_space.shape) > 1:
@@ -15,18 +15,10 @@ def create_atari_env(env_id):
 
 def _process_frame42(frame):
     frame = frame[34:34 + 160, :160]
-    # Resize by half, then down to 40x40 (essentially mipmapping). If
-    # we resize directly we lose pixels that, when mapped to 42x42,
-    # aren't close enough to the pixel boundary. Although I would advise
-    #not to again resize the image to 42x42 from 80x80.
     frame = cv2.resize(frame, (80, 80))
-    #Resizing again incresaes the variance in scores obtained at test
-    #Training was much more stable in 80x80 frame size
-    #frame = cv2.resize(frame, (42, 42))
     frame = frame.mean(2) #Gray
     frame = frame.astype(np.float32)
     frame *= (1.0 / 255.0) #Levels
-    #frame = np.reshape(frame, [1, 42, 42])
     return frame
 
 
