@@ -39,7 +39,7 @@ parser.add_argument('--env-name', default='BreakoutDeterministic-v4', metavar='E
 args = parser.parse_args()
 
 wandb.login()
-wandb.init(project='A3C-openaiGYM-Atari',name='AssaultDeterministic-v4', config=args, sync_tensorboard=True, settings=wandb.Settings(start_method='thread', console="off"))
+wandb.init(project='A3C-openaiGYM-Atari',name=args.env_name, config=args, sync_tensorboard=True, settings=wandb.Settings(start_method='thread', console="off"))
 
 
 def ensure_shared_grads(model, shared_model):
