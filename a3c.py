@@ -24,7 +24,31 @@ import torch.multiprocessing as mp
 from envs import create_atari_env
 from model import A3C
 import shared_optim
+import wandb
+import argparse
 
+parser = argparse.ArgumentParser(description='A3C')
+parser.add_argument('--lr', type=float, default=0.0001, metavar='LR',
+                    help='learning rate (default: 0.0001)')
+parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
+                    help='discount factor for rewards (default: 0.99)')
+parser.add_argument('--tau', type=float, default=1.00, metavar='T',
+                    help='parameter for GAE (default: 1.00)')
+parser.add_argument('--seed', type=int, default=1, metavar='S',
+                    help='random seed (default: 1)')
+parser.add_argument('--num-processes', type=int, default=4, metavar='N',
+                    help='how many training processes to use (default: 4')
+parser.add_argument('--num-steps', type=int, default=20, metavar='NS',
+                    help='number of forward steps in A3C (default: 20)')
+parser.add_argument('--max-episode-length', type=int, default=10000, metavar='M',
+                    help='maximum length of an episode (default: 10000)')
+parser.add_argument('--env-name', default='BreakoutDeterministic-v4', metavar='ENV',
+                    help='environment to train on (default: BreakoutDeterministic-v4)')
+
+args = parser.parse_args()
+
+wandb.login()
+wandb.init(project='A3C-openaiGYM-Atari',name='AssaultDeterministic-v4', config=args, sync_tensorboard=True, settings=wandb.Settings(start_method='thread', console="off"))
 
 
 def ensure_shared_grads(model, shared_model):
@@ -50,6 +74,7 @@ def train(rank, args, shared_model, optimizer=None):
     
     done = True
     episode_length = 0
+    agent_reward = 0
     while True:
         episode_length += 1
         # Sync with the shared model
@@ -80,6 +105,7 @@ def train(rank, args, shared_model, optimizer=None):
             done = done or episode_length >= args.max_episode_length
             #Clip Rewards from -1 to +1
             reward = max(min(reward, 1), -1)
+            agent_reward += reward
             if done:
                 episode_length = 0
                 state = env.reset()
@@ -90,6 +116,9 @@ def train(rank, args, shared_model, optimizer=None):
             rewards.append(reward)
             env.render()
             if done:
+                agent_name = 'agent_' + str(rank)
+                wandb.log({agent_name : agent_reward})
+                agent_reward = 0
                 break
         R = torch.zeros(1, 1)
         if not done:
@@ -168,6 +197,7 @@ def test(rank, args, shared_model):
                 time.strftime("%Hh %Mm %Ss",
                               time.gmtime(time.time() - start_time)),
                 reward_sum, episode_length))
+            wandb.log({'test_model_reward' : reward_sum})
             #Save Shared Weights and Weights when certain scores are achieved
             if reward_sum >= 20 and args.env_name == "PongDeterministic-v4":
                 print("Finished")
@@ -196,25 +226,7 @@ def test(rank, args, shared_model):
         
 
 
-import argparse
 
-parser = argparse.ArgumentParser(description='A3C')
-parser.add_argument('--lr', type=float, default=0.0001, metavar='LR',
-                    help='learning rate (default: 0.0001)')
-parser.add_argument('--gamma', type=float, default=0.99, metavar='G',
-                    help='discount factor for rewards (default: 0.99)')
-parser.add_argument('--tau', type=float, default=1.00, metavar='T',
-                    help='parameter for GAE (default: 1.00)')
-parser.add_argument('--seed', type=int, default=1, metavar='S',
-                    help='random seed (default: 1)')
-parser.add_argument('--num-processes', type=int, default=4, metavar='N',
-                    help='how many training processes to use (default: 4')
-parser.add_argument('--num-steps', type=int, default=20, metavar='NS',
-                    help='number of forward steps in A3C (default: 20)')
-parser.add_argument('--max-episode-length', type=int, default=10000, metavar='M',
-                    help='maximum length of an episode (default: 10000)')
-parser.add_argument('--env-name', default='BreakoutDeterministic-v4', metavar='ENV',
-                    help='environment to train on (default: BreakoutDeterministic-v4)')
 
 
 if __name__ == "__main__":
@@ -222,6 +234,7 @@ if __name__ == "__main__":
     os.environ['OMP_NUM_THREADS'] = '1'
     os.environ['DISPLAY'] = ':1'
     args = parser.parse_args()
+    
     
     torch.manual_seed(args.seed)
     env = create_atari_env(args.env_name)
