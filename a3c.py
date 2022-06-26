@@ -100,16 +100,17 @@ def train(rank, args, shared_model, optimizer=None):
             action = prob.multinomial(num_samples=1).data
 
             log_prob = log_prob.gather(1, Variable(action))
-            #Compute States and Rewards
+            #action을 env로 보내 state, reward를 return받음
             state, reward, done, _ = env.step(action.numpy())
             done = done or episode_length >= args.max_episode_length
-            #Clip Rewards from -1 to +1
+            
             reward = max(min(reward, 1), -1)
             agent_reward += reward
             if done:
                 episode_length = 0
                 state = env.reset()
-            #Append rewards, value functions, advantage and state
+                
+            #각각 state, value, reward, action 확률을 저장
             state = torch.from_numpy(state)
             values.append(value)
             log_probs.append(log_prob)
@@ -124,23 +125,25 @@ def train(rank, args, shared_model, optimizer=None):
         if not done:
             value, _, _ = model((Variable(state.unsqueeze(0)), hx))
             R = value.data
-        #Calculating Gradients
+            
+        #loss 계산
         values.append(Variable(R))
         policy_loss = 0
         value_loss = 0
         R = Variable(R)
         GAE = torch.zeros(1, 1)
         for i in reversed(range(len(rewards))):
-            #Discounted Sum of Future Rewards + reward for the given state
+            
             R = args.gamma * R + rewards[i]
             advantage = R - values[i]
             value_loss = value_loss + 0.5 * advantage.pow(2)
-            # Generalized Advantage Estimataion(GAE)
+            
             delta_t = rewards[i] + args.gamma * \
                 values[i + 1].data - values[i].data
             GAE = GAE * args.gamma * args.tau + delta_t
             policy_loss = policy_loss - \
                 log_probs[i] * Variable(GAE) - 0.01 * entropies[i]
+            
         optimizer.zero_grad()
         (policy_loss + 0.5 * value_loss).backward()
         torch.nn.utils.clip_grad_norm(model.parameters(), 40)
@@ -169,7 +172,7 @@ def test(rank, args, shared_model):
     episode_length = 0
     while True:
         episode_length += 1
-        # Sync with the shared model
+        # shared model과 파라미터 싱크
         if done:
             model.load_state_dict(shared_model.state_dict())
             hx = Variable(torch.zeros(1, 256), volatile=True)
@@ -187,7 +190,7 @@ def test(rank, args, shared_model):
         done = done or episode_length >= args.max_episode_length
         reward_sum += reward
 
-        # a quick hack to prevent the agent from stucking
+        
         actions.append(action)
         if actions.count(actions[0]) == actions.maxlen:
             done = True
@@ -198,7 +201,8 @@ def test(rank, args, shared_model):
                               time.gmtime(time.time() - start_time)),
                 reward_sum, episode_length))
             wandb.log({'test_model_reward' : reward_sum})
-            #Save Shared Weights and Weights when certain scores are achieved
+            
+            #각각 env에 대한 목표점수 설정
             if reward_sum >= 20 and args.env_name == "PongDeterministic-v4":
                 print("Finished")
                 torch.save(model.state_dict(), ('./A3C(Pong-1).pkl'))
@@ -216,44 +220,35 @@ def test(rank, args, shared_model):
                 print("Finished")
                 torch.save(model.state_dict(),('./A3C(Assault).pkl'))
                 torch.save(shared_model.state_dict(),('./A3C(Assault).pkl'))
+                
             reward_sum = 0
             episode_length = 0
             actions.clear()
             state = env.reset()
-            #Rest
+            
             time.sleep(60)
         state = torch.from_numpy(state)
         
-
-
-
-
-
 if __name__ == "__main__":
-    #Number of thread per cpu cores
     os.environ['OMP_NUM_THREADS'] = '1'
     os.environ['DISPLAY'] = ':1'
     args = parser.parse_args()
-    
-    
+     
     torch.manual_seed(args.seed)
     env = create_atari_env(args.env_name)
     shared_model = A3C(
         env.observation_space.shape[0], env.action_space)
     shared_model.share_memory()
-
-   
+  
     optimizer = shared_optim.SharedAdam(shared_model.parameters(), lr=args.lr)
     optimizer.share_memory()
     
-
-
     processes = []
-    #Test Run
+    # 멀티 프로세싱
     p = mp.Process(target=test, args=(args.num_processes, args, shared_model))
     p.start()
     processes.append(p)
-    #Run as many incarnation of the network for a given enviroment
+    
     for rank in range(0, args.num_processes):
         p = mp.Process(target=train, args=(rank, args, shared_model, optimizer))
         p.start()
